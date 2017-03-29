@@ -115,7 +115,83 @@ func Register(ctx context.Context, flags Flags, ifIndex int, serviceName, regTyp
 		fmt.Println("AddRecord=", rr)
 	}
 }
+func UnRegister(ctx context.Context, flags Flags, ifIndex int, serviceName, regType, domain, host string, port uint16, txt []string,
+	listener ServiceRegistered, errc ErrCallback) AddRecord {
 
+	if flags != None && flags != NoAutoRename {
+		errc(errBadFlags)
+		return nil
+	}
+
+	if domain == "" {
+		domain = getOwnDomainname()
+	}
+
+	if host == "" {
+		h, err := os.Hostname()
+		if err != nil {
+			errc(err)
+			return nil
+		}
+		host = h
+	}
+	if serviceName == "" {
+		serviceName = getManufacturedServiceName(host)
+	}
+
+	fullRegType := fmt.Sprintf("%s.%s.", regType, domain)
+	fullName := ConstructFullName(serviceName, regType, domain)
+	target := fmt.Sprintf("%s.%s.", host, domain)
+
+	recordsRegistered := uint8(0)
+	var registrar RegisterRecord
+	registrar = CreateRecordRegistrar(func(record dns.RR, flags int) {
+		fmt.Println("REGISTER: rr=", record)
+		recordsRegistered = recordsRegistered | flag(record)
+		if recordsRegistered == 6 {
+			// TXT and SRV are established. send the PTR
+			ptrRR := new(dns.PTR)
+			ptrRR.Hdr = dns.RR_Header{Name: fullRegType, Rrtype: dns.TypePTR, Class: dns.ClassINET, Ttl: 0} // TODO: TTL correct?
+			ptrRR.Ptr = fullName
+			fmt.Println("ptrRR=", ptrRR)
+			registrar(ctx, Shared, ifIndex, ptrRR)
+		}
+		if recordsRegistered == 7 {
+			listener(0, serviceName, regType, domain)
+		}
+	}, func(err error) {
+		errc(err)
+	})
+
+	srvRR := new(dns.SRV)
+	srvRR.Hdr = dns.RR_Header{Name: fullName, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: 20} // TODO: TTL correct?
+	srvRR.Target = target
+	srvRR.Port = port
+	srvRR.Priority = 0 // TODO: correct?
+	srvRR.Weight = 0   // TODO: correct?
+	fmt.Println("srvRR=", srvRR)
+	registrar(ctx, Unique, ifIndex, srvRR)
+
+	if txt != nil {
+		txtRR := new(dns.TXT)
+		txtRR.Hdr = dns.RR_Header{Name: fullName, Rrtype: dns.TypeTXT, Class: dns.ClassINET, Ttl: 3200} // TODO: TTL correct?
+		txtRR.Txt = txt
+		fmt.Println("txtRR=", txtRR)
+		registrar(ctx, Unique, ifIndex, txtRR)
+	}
+
+	return func(flags int, rr dns.RR) {
+		header := rr.Header()
+		if header.Name == "" {
+			header.Name = serviceName
+		} else {
+			if header.Name != serviceName {
+				panic(fmt.Sprint("AddRecord header name '", header.Name, "' != serviceName '", serviceName, "'"))
+			}
+		}
+		fmt.Println("AddRecord=", rr)
+	}
+}
 func getManufacturedServiceName(hostname string) string {
 	// TODO: make a bit better.
 	return fmt.Sprintf("%s%x%x", hostname, rand.Uint32(), rand.Uint32())
