@@ -43,6 +43,7 @@ Browsing for a Service
 			fmt.Println("Error browsing: ", err)
 			cancel()
 		})
+	select {}
 		
 Resolving a serviceName
 
@@ -54,6 +55,7 @@ Resolving a serviceName
 			fmt.Println("Error resolving: ", err)
 			cancel()
 		})
+	select {}
 
 Registering a service
 
@@ -69,6 +71,7 @@ Registering a service
 		fmt.Println("Error registering: ", err)
 		cancel()
 	})
+	select {}
 	
 Querying for an address
 
@@ -80,4 +83,4 @@ Querying for an address
 		}, func(err error) {
 			fmt.Println("Error querying: ", err)
 		})
-		
+	select {}
